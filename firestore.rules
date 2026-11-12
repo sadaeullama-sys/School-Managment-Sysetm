@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isSystemAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'system_admin';
+    }
+
+    // Admin allowlist documents must be created manually by the project owner in Firebase Console.
+    match /admins/{adminUid} {
+      allow read: if signedIn() && request.auth.uid == adminUid;
+      allow write: if false;
+    }
+
+    match /schools/{schoolId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.schoolId == schoolId
+        && request.resource.data.status == 'pending';
+      allow read: if signedIn() && (resource.data.ownerUid == request.auth.uid || isSystemAdmin());
+      allow update: if isSystemAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
+        && request.resource.data.status in ['approved', 'rejected'];
+      allow delete: if false;
+    }
+
+    match /schools/{schoolId}/{document=**} {
+      allow read, write: if signedIn()
+        && get(/databases/$(database)/documents/schools/$(schoolId)).data.ownerUid == request.auth.uid
+        && get(/databases/$(database)/documents/schools/$(schoolId)).data.status == 'approved';
+    }
+  }
+}
